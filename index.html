@@ -283,5 +283,100 @@
 
     </script>
     <script type="module" src="/src/addPlayButton.js"></script>
+    <script type="module">
+/*
+  Simple hash router / game mount for PixelFlapper
+  - Renders game into #gameView when hash === '#/game'
+  - Hides dashboard (#app) while game is mounted
+  - Clears game container when returning to dashboard
+  - Keeps Play button working and compatible with addPlayButton.js
+*/
+
+const DASHBOARD_ID = 'app';        // your dashboard root (existing)
+const GAME_CONTAINER_ID = 'gameView';
+
+function createGameContainerIfNeeded() {
+  let gameView = document.getElementById(GAME_CONTAINER_ID);
+  if (!gameView) {
+    gameView = document.createElement('div');
+    gameView.id = GAME_CONTAINER_ID;
+    // style it so it sits where the dashboard content was
+    gameView.style.display = 'none';
+    gameView.style.width = '100%';
+    gameView.style.boxSizing = 'border-box';
+    // insert AFTER the dashboard element
+    const dashboard = document.getElementById(DASHBOARD_ID);
+    dashboard.parentNode.insertBefore(gameView, dashboard.nextSibling);
+  }
+  return document.getElementById(GAME_CONTAINER_ID);
+}
+
+let currentGameModule = null; // hold module for potential cleanup
+
+async function showGame() {
+  const dashboard = document.getElementById(DASHBOARD_ID);
+  const gameView = createGameContainerIfNeeded();
+
+  // hide dashboard
+  dashboard.style.display = 'none';
+  // show game container
+  gameView.style.display = '';
+
+  // ensure the game container is empty before mounting
+  gameView.innerHTML = '';
+
+  // dynamic import of your game module (Vite supports absolute /src paths)
+  try {
+    // if it's already imported once, re-importing returns same module (caching)
+    const mod = await import('/src/game.js');
+    currentGameModule = mod;
+    if (typeof mod.renderGame === 'function') {
+      // renderGame expects a container element
+      mod.renderGame(gameView);
+    } else {
+      console.error('renderGame not found in /src/game.js');
+      gameView.innerHTML = '<p style="color:#fdd">Game module loaded but renderGame not found.</p>';
+    }
+  } catch (err) {
+    console.error('Failed to load game module:', err);
+    gameView.innerHTML = '<p style="color:#fdd">Failed to load game. Check console for details.</p>';
+  }
+}
+
+function showDashboard() {
+  const dashboard = document.getElementById(DASHBOARD_ID);
+  const gameView = document.getElementById(GAME_CONTAINER_ID);
+  if (gameView) {
+    // clear game HTML and hide
+    gameView.innerHTML = '';
+    gameView.style.display = 'none';
+  }
+  // show dashboard
+  dashboard.style.display = '';
+
+  // notify dashboard that we returned so it can refresh leaderboard / show Play
+  window.dispatchEvent(new Event('returnedFromGame'));
+}
+
+/* Router: listen for hash changes and initial load */
+async function handleRoute() {
+  const hash = (location.hash || '#/').toLowerCase();
+  if (hash === '#/game' || hash.startsWith('#/game')) {
+    await showGame();
+  } else {
+    showDashboard();
+  }
+}
+
+window.addEventListener('hashchange', handleRoute);
+window.addEventListener('DOMContentLoaded', handleRoute);
+
+// Also allow programmatic navigation helper:
+window.PFRouter = {
+  openGame() { location.hash = '#/game'; },
+  openDashboard() { location.hash = '#/'; }
+};
+</script>
+
 </body>
 </html>

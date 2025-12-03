@@ -35,6 +35,9 @@
             box-shadow: 0 0 0 0 #a21250;
             transform: translateY(4px);
         }
+
+        /* Ensure canvas is block-level and centered by default */
+        canvas { display: block; margin: 0 auto; }
     </style>
 </head>
 <body class="p-6 flex items-center justify-center">
@@ -338,21 +341,43 @@
       // clear previous content
       gameView.innerHTML = '';
 
-      // load the game module and render into gameView
+      // -----------------------
+      // <<< REPLACED BLOCK >>>
+      // create a full-width/height inner wrapper that centers canvas perfectly,
+      // then render the game INTO that wrapper (ensures centered alignment).
+      // -----------------------
       try {
         const mod = await import('/src/game.js');
         if (typeof mod.renderGame !== 'function') {
           gameView.innerHTML = '<div style="color:#fdd">renderGame not found in /src/game.js</div>';
           return;
         }
-        mod.renderGame(gameView);
+
+        // create a full-size inner wrapper to perfectly center the canvas
+        const inner = document.createElement('div');
+        Object.assign(inner.style, {
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          width: '100%',
+          height: '100%',
+          margin: '0',
+          padding: '0',
+          boxSizing: 'border-box'
+        });
+        // Ensure inner is empty and then append
+        inner.innerHTML = '';
+        gameView.appendChild(inner);
+
+        // render the game into the centered inner wrapper (not directly into gameView)
+        await Promise.resolve(mod.renderGame(inner));
 
         // wait a tick for the game to create the canvas element
         await new Promise(resolve => setTimeout(resolve, 60));
-        const canvas = document.getElementById(CANVAS_ID);
+        let canvas = document.getElementById(CANVAS_ID);
         if (!canvas) {
-          // fallback: try finding a canvas inside gameView
-          const fallback = gameView.querySelector('canvas');
+          // fallback: try finding a canvas inside inner
+          const fallback = inner.querySelector('canvas') || gameView.querySelector('canvas');
           if (fallback) fallback.id = CANVAS_ID;
         }
 
@@ -388,6 +413,7 @@
         console.error('Failed to load game module:', err);
         gameView.innerHTML = '<div style="color:#fdd">Failed to load game. See console.</div>';
       }
+      // <<< END REPLACED BLOCK >>>
     }
 
     function showDashboard() {

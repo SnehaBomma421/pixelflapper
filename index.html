@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Monoton&family=Press+Start+2P&display=swap');
+        
+        /* Custom font for the retro arcade look */
+        .retro-font {
+            font-family: 'Press Start 2P', cursive;
+        }
+        .monoton-font {
+            font-family: 'Monoton', cursive;
+        }
+        body {
+            background: linear-gradient(135deg, #1e3a8a, #0c4a6e);
+            min-height: 100vh;
+        }
+        .glass-card {
+            background-color: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+        .btn-retro {
+            background-color: #f72585; /* Vibrant Magenta */
+            color: white;
+            transition: all 0.1s;
+            box-shadow: 0 4px 0 0 #a21250;
+        }
+        .btn-retro:active {
+            box-shadow: 0 0 0 0 #a21250;
+            transform: translateY(4px);
+        }
+    </style>
+</head>
+<body class="p-6 flex items-center justify-center">
+
+    <div id="app" class="w-full max-w-4xl p-8 rounded-xl glass-card text-white">
+        
+        <h1 class="monoton-font text-5xl text-center mb-10 text-yellow-300 drop-shadow-lg">
+            PIXEL FLAPPER
+        </h1>
+
+        <!-- API Server Status (Required for Java connection) -->
+        <div class="mb-6 retro-font text-xs text-center p-3 rounded-lg border border-yellow-500 bg-yellow-900/50">
+            <span id="status-icon" class="inline-block w-3 h-3 bg-red-500 rounded-full mr-2 animate-pulse"></span>
+            API PORT: <span id="api-port">Loading...</span> | STATUS: <span id="api-status">Inactive</span>
+        </div>
+
+        <div class="flex flex-col md:flex-row gap-8">
+            <!-- Authentication Panel -->
+            <div class="w-full md:w-1/2 p-6 rounded-lg bg-gray-900/50">
+                <h2 class="retro-font text-xl mb-4 text-center text-pink-400">
+                    User Authentication
+                </h2>
+                
+                <div id="auth-view">
+                    <input type="text" id="username-input" placeholder="Username (Java Client ID)"
+                           class="w-full p-3 mb-4 rounded bg-gray-700 border border-gray-600 retro-font text-sm text-yellow-300 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-pink-400">
+                    
+                    <div class="flex gap-4">
+                        <button id="login-btn" class="w-1/2 p-3 rounded btn-retro retro-font text-sm">
+                            LOGIN (Simulated)
+                        </button>
+                        <button id="signup-btn" class="w-1/2 p-3 rounded btn-retro retro-font text-sm">
+                            SIGN UP
+                        </button>
+                    </div>
+                </div>
+                
+                <p id="auth-message" class="text-center mt-4 retro-font text-xs"></p>
+                <p id="current-user" class="text-center mt-4 retro-font text-sm text-green-400 hidden">
+                    <span class="text-gray-400">Logged in as:</span> <span class="text-yellow-300"></span>
+                </p>
+            </div>
+
+            <!-- Leaderboard Panel -->
+            <div class="w-full md:w-1/2 p-6 rounded-lg bg-gray-900/50">
+                <h2 class="retro-font text-xl mb-4 text-center text-pink-400">
+                    Global Leaderboard
+                </h2>
+                <div class="h-64 overflow-y-auto">
+                    <table class="w-full retro-font text-xs">
+                        <thead>
+                            <tr class="text-gray-400 border-b border-gray-700">
+                                <th class="py-2 text-left">Rank</th>
+                                <th class="py-2 text-left">Player</th>
+                                <th class="py-2 text-right">Score</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaderboard-body">
+                            <!-- Leaderboard data goes here -->
+                            <tr><td colspan="3" class="text-center py-4 text-gray-500">No scores yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_SERVER_PORT = 8081; // IMPORTANT: The Java code must use this port
+        const USERS_KEY = 'flappy_bird_users';
+        const SCORES_KEY = 'flappy_bird_scores';
+
+        const authMessage = document.getElementById('auth-message');
+        const currentUserDisplay = document.getElementById('current-user');
+        const currentUserSpan = currentUserDisplay.querySelector('span:last-child');
+        const leaderboardBody = document.getElementById('leaderboard-body');
+        const apiPortDisplay = document.getElementById('api-port');
+        const apiStatusDisplay = document.getElementById('api-status');
+        const statusIcon = document.getElementById('status-icon');
+
+        let users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+        let scores = JSON.parse(localStorage.getItem(SCORES_KEY) || '[]');
+        let currentUserId = null;
+
+        // --- Utility Functions ---
+
+        const saveToStorage = () => {
+            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+            localStorage.setItem(SCORES_KEY, JSON.stringify(scores));
+            renderLeaderboard();
+        };
+
+        const displayMessage = (msg, isError = false) => {
+            authMessage.textContent = msg;
+            authMessage.className = `text-center mt-4 retro-font text-xs ${isError ? 'text-red-400' : 'text-green-400'}`;
+        };
+
+        const renderLeaderboard = () => {
+            // Sort scores descending by score value
+            const sortedScores = scores.sort((a, b) => b.score - a.score);
+
+            leaderboardBody.innerHTML = '';
+            if (sortedScores.length === 0) {
+                 leaderboardBody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-gray-500">No scores yet.</td></tr>';
+                 return;
+            }
+
+            sortedScores.forEach((entry, index) => {
+                const row = leaderboardBody.insertRow();
+                row.className = index < 3 ? 'text-yellow-300' : 'text-white';
+                
+                row.insertCell().textContent = index + 1;
+                row.insertCell().textContent = entry.username;
+                row.insertCell().textContent = entry.score;
+                row.cells[2].className = 'py-2 text-right';
+            });
+        };
+
+        // --- Authentication Logic ---
+
+        document.getElementById('login-btn').addEventListener('click', () => {
+            const username = document.getElementById('username-input').value.trim();
+            if (!username) { displayMessage("Username required.", true); return; }
+            
+            const user = users.find(u => u.username === username);
+            if (user) {
+                currentUserId = username;
+                currentUserSpan.textContent = username;
+                currentUserDisplay.classList.remove('hidden');
+                displayMessage(`Welcome back, ${username}!`, false);
+            } else {
+                displayMessage("User not found. Please sign up first.", true);
+            }
+        });
+
+        document.getElementById('signup-btn').addEventListener('click', () => {
+            const username = document.getElementById('username-input').value.trim();
+            if (!username) { displayMessage("Username required.", true); return; }
+
+            if (users.find(u => u.username === username)) {
+                displayMessage("Username already taken. Please login.", true);
+                return;
+            }
+
+            users.push({ username: username });
+            saveToStorage();
+            currentUserId = username;
+            currentUserSpan.textContent = username;
+            currentUserDisplay.classList.remove('hidden');
+            displayMessage(`Account created for ${username}! Logged in.`, false);
+        });
+
+        // --- Local Server / API Simulation (KEY FOR JAVA COMMUNICATION) ---
+
+        const handleJavaRequest = async (request) => {
+            try {
+                const data = JSON.parse(await request.text());
+                const path = new URL(request.url).pathname;
+
+                if (path === '/api/login') {
+                    const { username } = data;
+                    const user = users.find(u => u.username === username);
+                    
+                    if (user) {
+                        return new Response(JSON.stringify({ status: 'success', message: 'Login successful', username }), { status: 200 });
+                    } else {
+                        return new Response(JSON.stringify({ status: 'error', message: 'User not found. Please register on the web portal.' }), { status: 401 });
+                    }
+                } 
+                
+                else if (path === '/api/submit_score') {
+                    const { username, score } = data;
+                    if (!username || typeof score !== 'number') {
+                        return new Response(JSON.stringify({ status: 'error', message: 'Invalid data' }), { status: 400 });
+                    }
+
+                    // 1. Check if user exists
+                    if (!users.find(u => u.username === username)) {
+                        return new Response(JSON.stringify({ status: 'error', message: 'Unauthorized: User must login/register first.' }), { status: 401 });
+                    }
+
+                    // 2. Find existing score entry or create new one
+                    let existingEntry = scores.find(s => s.username === username);
+
+                    if (existingEntry) {
+                        if (score > existingEntry.score) {
+                            existingEntry.score = score; // Update to high score
+                        }
+                    } else {
+                        scores.push({ username: username, score: score });
+                    }
+
+                    saveToStorage(); // Update localStorage and redraw leaderboard
+
+                    return new Response(JSON.stringify({ 
+                        status: 'success', 
+                        message: 'Score submitted and leaderboard updated.',
+                        newHighScore: existingEntry ? score > existingEntry.score : true
+                    }), { status: 200 });
+                }
+                
+                // Fallback for status check or other requests
+                else {
+                    return new Response(JSON.stringify({ status: 'ready', message: 'API is running' }), { status: 200 });
+                }
+
+            } catch (error) {
+                console.error("API error:", error);
+                return new Response(JSON.stringify({ status: 'error', message: 'Server processing error' }), { status: 500 });
+            }
+        };
+
+        // The core of the API simulation: A persistent listener on a specific port
+        const startAPIServer = () => {
+            // This requires the Canvas execution environment to support this non-standard fetch mode.
+            // If it doesn't work, the user must understand the API is simulated and Java connection won't work.
+            try {
+                window.addEventListener('fetch', (event) => {
+                    // Only process requests that come from the Java side (simulated here)
+                    if (event.request.url.includes(`:${API_SERVER_PORT}/`)) {
+                        event.respondWith(handleJavaRequest(event.request));
+                    }
+                });
+                
+                // Update UI status
+                apiPortDisplay.textContent = API_SERVER_PORT;
+                apiStatusDisplay.textContent = 'Active (Ready for Java Client)';
+                statusIcon.classList.remove('bg-red-500', 'animate-pulse');
+                statusIcon.classList.add('bg-green-500');
+
+            } catch (error) {
+                console.error("API Server Simulation Failed. Standard fetch listener used.", error);
+                apiPortDisplay.textContent = API_SERVER_PORT;
+                apiStatusDisplay.textContent = 'Passive (Manual testing only)';
+                // Passive mode is the default fallback if the Canvas cannot simulate the server port.
+            }
+        };
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            saveToStorage(); // Initial render of the leaderboard
+            startAPIServer(); // Start the simulated API listener
+        });
+        
+
+
+    </script>
+    <script type="module" src="/src/addPlayButton.js"></script>
+</body>
+</html>

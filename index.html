@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Game Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -283,100 +283,178 @@
 
     </script>
     <script type="module" src="/src/addPlayButton.js"></script>
+
+    <!-- ===== improved router + centering/scaling block (added) ===== -->
     <script type="module">
-/*
-  Simple hash router / game mount for PixelFlapper
-  - Renders game into #gameView when hash === '#/game'
-  - Hides dashboard (#app) while game is mounted
-  - Clears game container when returning to dashboard
-  - Keeps Play button working and compatible with addPlayButton.js
-*/
+    /*
+     Improved router + canvas centering + responsive scaling
+     - Replaces previous router script. Drop into index.html before </body>.
+     - Keeps dashboard (#app) hidden while game is mounted.
+     - Scales the canvas to fit viewport while preserving aspect ratio.
+    */
 
-const DASHBOARD_ID = 'app';        // your dashboard root (existing)
-const GAME_CONTAINER_ID = 'gameView';
+    const DASHBOARD_ID = 'app';
+    const GAME_CONTAINER_ID = 'gameView';
+    const CANVAS_ID = 'gameCanvas'; // must match the id used by your game module
+    const CANVAS_WIDTH = 480;       // same as CANVAS_W in src/game.js
+    const CANVAS_HEIGHT = 800;      // same as CANVAS_H in src/game.js
 
-function createGameContainerIfNeeded() {
-  let gameView = document.getElementById(GAME_CONTAINER_ID);
-  if (!gameView) {
-    gameView = document.createElement('div');
-    gameView.id = GAME_CONTAINER_ID;
-    // style it so it sits where the dashboard content was
-    gameView.style.display = 'none';
-    gameView.style.width = '100%';
-    gameView.style.boxSizing = 'border-box';
-    // insert AFTER the dashboard element
-    const dashboard = document.getElementById(DASHBOARD_ID);
-    dashboard.parentNode.insertBefore(gameView, dashboard.nextSibling);
-  }
-  return document.getElementById(GAME_CONTAINER_ID);
-}
+    function createGameContainerIfNeeded() {
+      let gameView = document.getElementById(GAME_CONTAINER_ID);
+      if (!gameView) {
+        gameView = document.createElement('div');
+        gameView.id = GAME_CONTAINER_ID;
 
-let currentGameModule = null; // hold module for potential cleanup
+        // center and allow vertical centering; cover available height
+        Object.assign(gameView.style, {
+          display: 'none',                       // hidden until mounted
+          width: '100%',
+          minHeight: '70vh',                     // keeps some top/bottom space
+          boxSizing: 'border-box',
+          padding: '24px 12px',
+          display: 'flex',
+          justifyContent: 'center',              // horizontal center
+          alignItems: 'center',                  // vertical center
+          overflow: 'auto'                       // allow scrolling on very small screens
+        });
 
-async function showGame() {
-  const dashboard = document.getElementById(DASHBOARD_ID);
-  const gameView = createGameContainerIfNeeded();
-
-  // hide dashboard
-  dashboard.style.display = 'none';
-  // show game container
-  gameView.style.display = '';
-
-  // ensure the game container is empty before mounting
-  gameView.innerHTML = '';
-
-  // dynamic import of your game module (Vite supports absolute /src paths)
-  try {
-    // if it's already imported once, re-importing returns same module (caching)
-    const mod = await import('/src/game.js');
-    currentGameModule = mod;
-    if (typeof mod.renderGame === 'function') {
-      // renderGame expects a container element
-      mod.renderGame(gameView);
-    } else {
-      console.error('renderGame not found in /src/game.js');
-      gameView.innerHTML = '<p style="color:#fdd">Game module loaded but renderGame not found.</p>';
+        const dashboard = document.getElementById(DASHBOARD_ID);
+        dashboard.parentNode.insertBefore(gameView, dashboard.nextSibling);
+      }
+      return document.getElementById(GAME_CONTAINER_ID);
     }
-  } catch (err) {
-    console.error('Failed to load game module:', err);
-    gameView.innerHTML = '<p style="color:#fdd">Failed to load game. Check console for details.</p>';
-  }
-}
 
-function showDashboard() {
-  const dashboard = document.getElementById(DASHBOARD_ID);
-  const gameView = document.getElementById(GAME_CONTAINER_ID);
-  if (gameView) {
-    // clear game HTML and hide
-    gameView.innerHTML = '';
-    gameView.style.display = 'none';
-  }
-  // show dashboard
-  dashboard.style.display = '';
+    let resizeObserver = null;
 
-  // notify dashboard that we returned so it can refresh leaderboard / show Play
-  window.dispatchEvent(new Event('returnedFromGame'));
-}
+    async function showGame() {
+      const dashboard = document.getElementById(DASHBOARD_ID);
+      const gameView = createGameContainerIfNeeded();
 
-/* Router: listen for hash changes and initial load */
-async function handleRoute() {
-  const hash = (location.hash || '#/').toLowerCase();
-  if (hash === '#/game' || hash.startsWith('#/game')) {
-    await showGame();
-  } else {
-    showDashboard();
-  }
-}
+      // hide dashboard
+      dashboard.style.display = 'none';
+      // show game container
+      gameView.style.display = '';
 
-window.addEventListener('hashchange', handleRoute);
-window.addEventListener('DOMContentLoaded', handleRoute);
+      // clear previous content
+      gameView.innerHTML = '';
 
-// Also allow programmatic navigation helper:
-window.PFRouter = {
-  openGame() { location.hash = '#/game'; },
-  openDashboard() { location.hash = '#/'; }
-};
-</script>
+      // load the game module and render into gameView
+      try {
+        const mod = await import('/src/game.js');
+        if (typeof mod.renderGame !== 'function') {
+          gameView.innerHTML = '<div style="color:#fdd">renderGame not found in /src/game.js</div>';
+          return;
+        }
+        mod.renderGame(gameView);
+
+        // wait a tick for the game to create the canvas element
+        await new Promise(resolve => setTimeout(resolve, 60));
+        const canvas = document.getElementById(CANVAS_ID);
+        if (!canvas) {
+          // fallback: try finding a canvas inside gameView
+          const fallback = gameView.querySelector('canvas');
+          if (fallback) fallback.id = CANVAS_ID;
+        }
+
+        // apply base canvas CSS to ensure nice centering and transform origin
+        const c = document.getElementById(CANVAS_ID);
+        if (c) {
+          Object.assign(c.style, {
+            display: 'block',           // ensure it's a block-level for centering
+            transformOrigin: 'left top',
+            // remove default border-radius that may clip scaling
+            maxWidth: 'none',
+            width: `${CANVAS_WIDTH}px`,
+            height: `${CANVAS_HEIGHT}px`
+          });
+
+          // do initial scale and attach resize listener
+          scaleCanvasToFit();
+          window.addEventListener('resize', scaleCanvasToFit);
+
+          // optional: observe DOM changes in case game re-creates canvas later
+          if (!resizeObserver) {
+            resizeObserver = new MutationObserver(() => {
+              // try re-scaling if canvas gets replaced
+              setTimeout(scaleCanvasToFit, 50);
+            });
+            resizeObserver.observe(gameView, { childList: true, subtree: true });
+          }
+        } else {
+          console.warn('Canvas element not found after renderGame.');
+        }
+
+      } catch (err) {
+        console.error('Failed to load game module:', err);
+        gameView.innerHTML = '<div style="color:#fdd">Failed to load game. See console.</div>';
+      }
+    }
+
+    function showDashboard() {
+      const dashboard = document.getElementById(DASHBOARD_ID);
+      const gameView = document.getElementById(GAME_CONTAINER_ID);
+      if (gameView) {
+        // remove resize listener(s)
+        window.removeEventListener('resize', scaleCanvasToFit);
+        if (resizeObserver) {
+          resizeObserver.disconnect();
+          resizeObserver = null;
+        }
+
+        // clear and hide game view
+        gameView.innerHTML = '';
+        gameView.style.display = 'none';
+      }
+      // show dashboard
+      dashboard.style.display = '';
+
+      // notify dashboard that we returned so it can refresh
+      window.dispatchEvent(new Event('returnedFromGame'));
+    }
+
+    /* Scale canvas to best fit available viewport area (preserve aspect ratio) */
+    function scaleCanvasToFit() {
+      const c = document.getElementById(CANVAS_ID);
+      if (!c) return;
+
+      // available area inside window (account for some padding)
+      const availW = Math.max(200, window.innerWidth * 0.90); // 90% width
+      const availH = Math.max(300, window.innerHeight * 0.86); // 86% height
+
+      // compute scale to fit width and height without cropping
+      const scaleW = availW / CANVAS_WIDTH;
+      const scaleH = availH / CANVAS_HEIGHT;
+      const scale = Math.min(scaleW, scaleH, 1.8); // don't scale beyond 1.8x (optional)
+
+      // apply CSS transform scale
+      c.style.transform = `scale(${scale})`;
+
+      // Because transform scales from top-left by transformOrigin,
+      // center the scaled canvas inside parent by setting a wrapper width/height
+      // Give the canvas a small margin so it doesn't touch container edges
+      c.style.margin = '12px';
+    }
+
+    /* Router handling */
+    async function handleRoute() {
+      const hash = (location.hash || '#/').toLowerCase();
+      if (hash === '#/game' || hash.startsWith('#/game')) {
+        await showGame();
+      } else {
+        showDashboard();
+      }
+    }
+
+    window.addEventListener('hashchange', handleRoute);
+    window.addEventListener('DOMContentLoaded', handleRoute);
+
+    // Expose helpers
+    window.PFRouter = {
+      openGame() { location.hash = '#/game'; },
+      openDashboard() { location.hash = '#/'; }
+    };
+    </script>
+    <!-- ===== end router block ===== -->
 
 </body>
 </html>
